@@ -1,0 +1,99 @@
+name: Frontend CD
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  RESOURCE_GROUP: aidialloRG
+  STATIC_WEB_APP_NAME: swa-azuretech-dev
+  BACKEND_APP_NAME: app-azuretech-dev
+  KEYVAULT_NAME: kv-aicha-dev
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Resolve backend URL
+        id: backend
+        shell: bash
+        run: |
+          BACKEND_HOST=$(az webapp show \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$BACKEND_APP_NAME" \
+            --query defaultHostName \
+            --output tsv)
+
+          echo "url=https://${BACKEND_HOST}/api" >> "$GITHUB_OUTPUT"
+
+      - name: Read backend API key
+        id: apikey
+        shell: bash
+        run: |
+          API_KEY=$(az keyvault secret show \
+            --vault-name "$KEYVAULT_NAME" \
+            --name backend-api-key \
+            --query value \
+            --output tsv)
+
+          echo "::add-mask::$API_KEY"
+          echo "value=$API_KEY" >> "$GITHUB_OUTPUT"
+
+      - name: Inject production configuration
+        env:
+          API_BASE_URL: ${{ steps.backend.outputs.url }}
+          API_KEY: ${{ steps.apikey.outputs.value }}
+        shell: bash
+        run: |
+          sed -i "s#https://REPLACE_WITH_PROD_API_URL/api#${API_BASE_URL}#" src/environments/environment.ts
+          sed -i "s#__BACKEND_API_KEY__#${API_KEY}#" src/environments/environment.ts
+
+      - name: Build Angular
+        run: npm run build
+
+      - name: Get Static Web App deployment token
+        id: swa
+        shell: bash
+        run: |
+          TOKEN=$(az staticwebapp secrets list \
+            --name "$STATIC_WEB_APP_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --query "properties.apiKey" \
+            --output tsv)
+
+          echo "::add-mask::$TOKEN"
+          echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy to Azure Static Web Apps
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ steps.swa.outputs.token }}
+          action: upload
+          app_location: dist/azure-quiz-frontend/browser
+          output_location: ""
+          skip_app_build: true
