@@ -5,15 +5,14 @@ on:
     branches:
       - main
 
+  workflow_dispatch:
+
 permissions:
   contents: read
   id-token: write
 
 env:
-  RESOURCE_GROUP: aidialloRG
-  STATIC_WEB_APP_NAME: swa-azuretech-dev
-  BACKEND_APP_NAME: app-azuretech-dev
-  KEYVAULT_NAME: kv-aicha-dev
+  OWNER_TAG: aicha-conteneur
 
 jobs:
   deploy:
@@ -39,15 +38,75 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
+      - name: Resolve Azure resources by tags
+        id: resources
+        shell: bash
+        run: |
+          BACKEND_APP_NAME=$(az resource list \
+            --query "[?type=='Microsoft.Web/sites' && tags.owner=='$OWNER_TAG' && tags.component=='backend'].name | [0]" \
+            --output tsv)
+
+          BACKEND_RESOURCE_GROUP=$(az resource list \
+            --query "[?type=='Microsoft.Web/sites' && tags.owner=='$OWNER_TAG' && tags.component=='backend'].resourceGroup | [0]" \
+            --output tsv)
+
+          STATIC_WEB_APP_NAME=$(az resource list \
+            --query "[?type=='Microsoft.Web/staticSites' && tags.owner=='$OWNER_TAG' && tags.component=='frontend'].name | [0]" \
+            --output tsv)
+
+          STATIC_WEB_APP_RESOURCE_GROUP=$(az resource list \
+            --query "[?type=='Microsoft.Web/staticSites' && tags.owner=='$OWNER_TAG' && tags.component=='frontend'].resourceGroup | [0]" \
+            --output tsv)
+
+          KEYVAULT_NAME=$(az resource list \
+            --query "[?type=='Microsoft.KeyVault/vaults' && tags.owner=='$OWNER_TAG' && tags.component=='keyvault'].name | [0]" \
+            --output tsv)
+
+          if [ -z "$BACKEND_APP_NAME" ]; then
+            echo "ERROR: Backend App Service not found using tags."
+            exit 1
+          fi
+
+          if [ -z "$BACKEND_RESOURCE_GROUP" ]; then
+            echo "ERROR: Backend resource group not found."
+            exit 1
+          fi
+
+          if [ -z "$STATIC_WEB_APP_NAME" ]; then
+            echo "ERROR: Static Web App not found using tags."
+            exit 1
+          fi
+
+          if [ -z "$STATIC_WEB_APP_RESOURCE_GROUP" ]; then
+            echo "ERROR: Static Web App resource group not found."
+            exit 1
+          fi
+
+          if [ -z "$KEYVAULT_NAME" ]; then
+            echo "ERROR: Key Vault not found using tags."
+            exit 1
+          fi
+
+          echo "backend=$BACKEND_APP_NAME" >> "$GITHUB_OUTPUT"
+          echo "backend_rg=$BACKEND_RESOURCE_GROUP" >> "$GITHUB_OUTPUT"
+          echo "frontend=$STATIC_WEB_APP_NAME" >> "$GITHUB_OUTPUT"
+          echo "frontend_rg=$STATIC_WEB_APP_RESOURCE_GROUP" >> "$GITHUB_OUTPUT"
+          echo "keyvault=$KEYVAULT_NAME" >> "$GITHUB_OUTPUT"
+
       - name: Resolve backend URL
         id: backend
         shell: bash
         run: |
           BACKEND_HOST=$(az webapp show \
-            --resource-group "$RESOURCE_GROUP" \
-            --name "$BACKEND_APP_NAME" \
+            --resource-group "${{ steps.resources.outputs.backend_rg }}" \
+            --name "${{ steps.resources.outputs.backend }}" \
             --query defaultHostName \
             --output tsv)
+
+          if [ -z "$BACKEND_HOST" ]; then
+            echo "ERROR: Backend hostname not found."
+            exit 1
+          fi
 
           echo "url=https://${BACKEND_HOST}/api" >> "$GITHUB_OUTPUT"
 
@@ -56,10 +115,15 @@ jobs:
         shell: bash
         run: |
           API_KEY=$(az keyvault secret show \
-            --vault-name "$KEYVAULT_NAME" \
+            --vault-name "${{ steps.resources.outputs.keyvault }}" \
             --name backend-api-key \
             --query value \
             --output tsv)
+
+          if [ -z "$API_KEY" ]; then
+            echo "ERROR: Backend API key not found."
+            exit 1
+          fi
 
           echo "::add-mask::$API_KEY"
           echo "value=$API_KEY" >> "$GITHUB_OUTPUT"
@@ -70,8 +134,11 @@ jobs:
           API_KEY: ${{ steps.apikey.outputs.value }}
         shell: bash
         run: |
-          sed -i "s#https://REPLACE_WITH_PROD_API_URL/api#${API_BASE_URL}#" src/environments/environment.ts
-          sed -i "s#__BACKEND_API_KEY__#${API_KEY}#" src/environments/environment.ts
+          sed -i "s#https://REPLACE_WITH_PROD_API_URL/api#${API_BASE_URL}#" \
+            src/environments/environment.ts
+
+          sed -i "s#__BACKEND_API_KEY__#${API_KEY}#" \
+            src/environments/environment.ts
 
       - name: Build Angular
         run: npm run build
@@ -81,10 +148,15 @@ jobs:
         shell: bash
         run: |
           TOKEN=$(az staticwebapp secrets list \
-            --name "$STATIC_WEB_APP_NAME" \
-            --resource-group "$RESOURCE_GROUP" \
+            --name "${{ steps.resources.outputs.frontend }}" \
+            --resource-group "${{ steps.resources.outputs.frontend_rg }}" \
             --query "properties.apiKey" \
             --output tsv)
+
+          if [ -z "$TOKEN" ]; then
+            echo "ERROR: Static Web App deployment token not found."
+            exit 1
+          fi
 
           echo "::add-mask::$TOKEN"
           echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
