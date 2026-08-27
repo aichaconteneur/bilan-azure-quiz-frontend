@@ -1,54 +1,62 @@
-# azure-quiz-frontend
+# Azure Quiz — Frontend
 
-Angular application to review Microsoft certifications (AZ-900 to start, AZ-104 next): review by
-module or mock exam, accessible from a simple link (no account). Consumes the REST API of
-[azure-quiz-backend](../azure-quiz-backend).
+## Présentation
 
+Ce dépôt contient le frontend de l'application **Azure Quiz**.
 
-## Stack
+L'application est développée avec **Angular** et hébergée sur **Azure Static Web Apps**.
 
-- Angular 22 (standalone components, signals), Angular Material, ngx-translate (fr/en)
-- Vitest (Angular CLI 22 native test runner)
-- ESLint (`angular-eslint`) + Prettier, husky + lint-staged on pre-commit
+Elle communique avec le backend Spring Boot hébergé sur **Azure App Service**.
 
-## Run locally
+---
 
-Prerequisites: Node 22+, and the backend (`azure-quiz-backend`) running on `http://localhost:8080`.
+## Architecture
 
-```bash
-npm install
-npm start   # http://localhost:4200, targets the API on localhost:8080 (see src/environments/environment.development.ts)
-```
+![Architecture Frontend](architecture-frontend.jpg)
 
-## Tests and quality
+L'utilisateur accède à l'application Angular depuis Azure Static Web Apps.
 
-```bash
-npm test           # Vitest
-npm run test:coverage
-npm run lint
-npm run format:check
-```
+Le frontend communique en HTTPS avec l'API du backend hébergée sur Azure App Service.
 
-## Production build
+L'infrastructure Azure est créée et maintenue séparément avec Terraform.
 
-```bash
-npm run build:prod
-```
+---
 
-Static output in `dist/azure-quiz-frontend/browser` (that's the folder to point to as
-`output_location` when deploying to Azure Static Web Apps).
+## Technologies
 
-Before building for a real deployment, update `src/environments/environment.ts` with the deployed
-backend API URL (`apiBaseUrl`).
+- Angular
+- TypeScript
+- Node.js
+- npm
+- Azure Static Web Apps
+- GitHub Actions
 
+---
 
-## Structure
+## CI/CD
 
-- `src/app/core` — models, services (`QuizApiService` for REST calls, `QuizSessionStore` for
-  signal-based quiz session state)
-- `src/app/features` — pages: `certifications` (home), `modules` (a certification's modules +
-  starting a mock exam), `quiz` (question-by-question flow), `results` (final score)
+Le projet utilise GitHub Actions pour automatiser l'intégration et le déploiement.
 
-## Out of scope for this repo
+La CI vérifie la qualité du code, exécute les tests et construit l'application.
 
-- Provisioning the Azure infrastructure (Static Web App, App Service, database).
+Le CD construit la version de production et la déploie sur Azure Static Web Apps.
+
+L'authentification entre GitHub Actions et Azure utilise OIDC.
+
+---
+
+## Sécurité
+
+Le frontend communique avec le backend en HTTPS.
+
+Le backend limite les origines autorisées avec CORS.
+
+Des contrôles de sécurité sont également exécutés dans la CI afin de détecter les vulnérabilités et les secrets éventuellement présents dans le dépôt.
+
+---
+
+## Déploiement
+
+Le frontend est hébergé sur **Azure Static Web Apps**.
+
+L'infrastructure Azure associée est gérée dans le dépôt Terraform du projet.
