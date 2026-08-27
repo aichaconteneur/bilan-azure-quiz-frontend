@@ -4,17 +4,21 @@ on:
   push:
     branches:
       - main
+
   pull_request:
     branches:
       - main
-      
+
+permissions:
+  contents: read
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -33,6 +37,12 @@ jobs:
 
       - name: Run tests
         run: npm test
+
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
+
+      - name: Gitleaks Secret Scan
+        uses: gitleaks/gitleaks-action@v2
 
       - name: Build application
         run: npm run build
